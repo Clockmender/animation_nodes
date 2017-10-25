@@ -12,7 +12,7 @@ class MidiControlNode(bpy.types.Node, AnimationNode):
     bl_width_default = 450
 
     useV = BoolProperty(name = "Use MIDI Velocity", default = False, update = propertyChanged)
-    offset = IntProperty(name = "Offset", default = 0, min = -100, max = 100)
+    offset = IntProperty(name = "Offset", default = 0, min = -1000, max = 10000)
     easing = FloatProperty(name = "Easing", default = 0.2, precision = 3)
     soundName = StringProperty(name = "Sound")
     message1 = StringProperty("")
@@ -136,6 +136,7 @@ class MidiControlNode(bpy.types.Node, AnimationNode):
             if (len(control_list[last_c]) == 1):
                 control_list.pop()
 
+            control_Objs = []
             for control in control_list:
                 if (len(control) == 1):
                     # Sort out the group names.
@@ -159,6 +160,7 @@ class MidiControlNode(bpy.types.Node, AnimationNode):
                     bpy.ops.object.group_link(group=t_name)
                     bpy.context.active_object.location.z = 0
                     bpy.context.active_object.keyframe_insert( data_path='location', index=2, frame=1 )
+                    control_Objs.append(bpy.context.active_object)
                     bpy.context.active_object.select = False
                     prev = track
 
@@ -211,7 +213,9 @@ class MidiControlNode(bpy.types.Node, AnimationNode):
                         ob.keyframe_insert( data_path='location', index=2, frame=(frame + easingp) )
                     ob.select = False
 
-            # Process complete, use controls to drive animations, they are named by track and note.
+            # MIDI Event Process complete, use controls to drive animations, they are named by track and note.
 
-            self.message1 = "Process Complete - controls on active layer(s)."
+            numb = ""
+            numb = str(len(control_Objs))
+            self.message1 = "Process Complete - " + numb + " controls on active layer(s)."
             self.message2 = ""
