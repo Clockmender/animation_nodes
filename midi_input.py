@@ -9,6 +9,7 @@ from ... utils.path import getAbsolutePathOfSound
 
 class MidiNoteData(bpy.types.PropertyGroup):
     noteName = StringProperty() # e.g. C4, B5, ...
+    noteIndex = IntProperty()
     # This value can be keyframed.
     # It is possible but not easy to 'find' the fcurve of this property.
     # Therefor only the value in the current frame can be accessed efficiently.
@@ -18,7 +19,7 @@ class MidiNoteData(bpy.types.PropertyGroup):
 class MidiInputNode(bpy.types.Node, AnimationNode):
     bl_idname = "an_MidiInputNode"
     bl_label = "MIDI Input Node, Vers 1.0"
-    bl_width_default = 400
+    bl_width_default = 450
 
     # Setup variables
     useV = BoolProperty(name = "Use MIDI Velocity", default = False, update = propertyChanged)
@@ -39,7 +40,7 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
     def create(self):
         self.newOutput("Text List", "Notes", "notes")
         self.newOutput("Float List", "Values", "values")
-        self.newOutput("Float List", "Index", "index1")
+        self.newOutput("Integer List", "Indices", "indices")
 
     def draw(self, layout):
         layout.prop(self, "Channel_Number")
@@ -63,7 +64,8 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
     def execute(self):
         notes = [item.noteName for item in self.notes]
         values = [item.value for item in self.notes]
-        return notes, DoubleList.fromValues(values)
+        indices = [item.noteIndex for item in self.notes]
+        return notes, DoubleList.fromValues(values), indices
 
     def loadSound(self, path):
         editor = getOrCreateSequencer(self.nodeTree.scene)
@@ -153,19 +155,28 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
                         note_n = note_list[(int(in_l[4]) - 21)]
                         on_off = in_l[2]
                         velo = int(in_l[5]) / 127
-                        if (on_off == "Note_on_c"):
+                        if on_off == "Note_on_c":
                             if velp:
                                 on_off = velo
+                                pon_off = 0
                             else:
-                                on_off = "1"
-                        else:
-                            on_off = "0"
+                                on_off = 1
+                                pon_off = 0
+                        elif on_off == "Note_off_c":
+                            on_off = 0
+                            if velp:
+                                pon_off = 0.8
+                            else:
+                                pon_off = 1
                         # On-Off, Frame, Note, Velocity
                         conv = (60 / (bpm * pulse))
                         frame_e = int(in_l[1])
                         frame_e = frame_e * conv * fps
                         frame_e = round(frame_e, 2) + self.offset
-                        in_n = [on_off, str(frame_e), note_n, in_l[5] ]
+                        frame_p = frame_e - self.easing
+                        in_e = [str(pon_off), str(frame_p), note_n]
+                        events_list.append(in_e)
+                        in_n = [str(on_off), str(frame_e), note_n]
                         events_list.append(in_n)
                         control = note_n
                         if control not in control_list:
@@ -175,9 +186,9 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
             numb_1 = 0
             numb_2 = 0
             numb_1 = len(control_list)
-            numb_2 = len(events_list)
+            numb_2 = int(len(events_list) / 2)
             self.message1 = "Baking File: " + self.midiName + ", Controls= " + str(numb_1 - 1) + ", Channel No = " + self.Channel_Number
-            self.message2 = "Events = " +str(numb_2) + ", Pulse = " + str(pulse) + ", BPM = " + str(int(bpm)) + ", Tempo = " + str(tempo)
+            self.message2 = "Note Events = " +str(numb_2) + ", Pulse = " + str(pulse) + ", BPM = " + str(int(bpm)) + ", Tempo = " + str(tempo)
 
         # This function creates an abstraction for the somewhat complicated stuff
         # that is needed to insert the keyframes. It is needed because in Blender
@@ -187,37 +198,36 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
             item = self.notes.add()
             item.noteName = name
 
-            def insertKeyframe(value, frame):
+            def insertKeyframe(value, noteIndex, frame):
                 item.value = value
+                item.noteIndex = noteIndex
                 self.id_data.keyframe_insert(dataPath, frame = frame)
 
             return insertKeyframe
 
         # Get Channel Name and process events for each note
         channelName = control_list[0]
-        # Loop through Notes
-        for rec in range(1, numb_1):  # len(control_list)
-            f_n = control_list[rec][0]
-            name = channelName + "_" + f_n
-            ev_list = [bit for bit in events_list if bit[2] == f_n]
-            addKeyframe = createNote(name)
-            # Value, then Frame
-            addKeyframe(value = 0 , frame = 1)
-            # Range used so I can test a smal section:
-            for ind in range(0,len(ev_list)):
-                addKeyframe(value = float(ev_list[ind][0]), frame = float(ev_list[ind][1]) )
-
-        # Build Index file if group name is good
-        group = bpy.data.groups.get(self.keys_grp)
-        assert group is not None
-        keys_objs = group.objects
         control_list.pop(0)
         ke_names = []
-        index = []
-        for obj in keys_objs:
-            note = obj.name.split("_")[0]
-            ke_names.append(note)
+        group = bpy.data.groups.get(self.keys_grp)
+        if group is not None:
+            keys_objs = group.objects
+            for obj in keys_objs:
+                note = obj.name.split("_")[0]
+                ke_names.append(note)
+        # Loop through Notes
+        for rec in range(0, (numb_1 - 1)):
+            f_n = control_list[rec]
+            name = channelName + "_" + f_n
+            indx = 0
+            for i in range( 0, len(ke_names)):
+                if ke_names[i] == f_n:
+                    indx = i
 
-        for note in control_list:
-            indx = ke_names.index(note)
-            index.append(indx)
+            ev_list = [bit for bit in events_list if bit[2] == f_n]
+            addKeyframe = createNote(name)
+            # Value, then noteindex, then Frame
+            # addKeyframe(value = 0 ,noteIndex = 0, frame = 1)
+            # Range used so I can test a small section:
+            for ind in range(0,len(ev_list)):
+                addKeyframe(value = float(ev_list[ind][0]), noteIndex = indx, frame = float(ev_list[ind][1]) )
