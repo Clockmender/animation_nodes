@@ -8,10 +8,11 @@ from ... utils.path import getAbsolutePathOfSound
 
 class MidiControlNode(bpy.types.Node, AnimationNode):
     bl_idname = "an_MidiControlNode"
-    bl_label = "MIDI Control Node; Version 1.0"
+    bl_label = "MIDI Control Node; Version 1.1 (Multi Channel)"
     bl_width_default = 450
 
     useV = BoolProperty(name = "Use MIDI Velocity", default = False, update = propertyChanged)
+    square = BoolProperty(name = "Use Square Waveform", default = True, update = propertyChanged)
     offset = IntProperty(name = "Offset", default = 0, min = -1000, max = 10000)
     easing = FloatProperty(name = "Easing", default = 0.2, precision = 3)
     soundName = StringProperty(name = "Sound")
@@ -33,6 +34,7 @@ class MidiControlNode(bpy.types.Node, AnimationNode):
         self.invokeFunction(col, "resetNode", icon = "X",
             text = "Reset Node for new CSV File")
 
+        layout.prop(self, "square")
         layout.prop(self, "useV")
         layout.prop(self, "easing")
         layout.prop(self, "offset")
@@ -107,7 +109,7 @@ class MidiControlNode(bpy.types.Node, AnimationNode):
                             # Add Tempo Changes to events list.
                             events_list.append(in_l)
 
-                    elif (in_l[2] == 'Title_t') and (int(in_l[0]) > 1):
+                    elif (in_l[2] == 'Title_t') and (int(in_l[0]) > 1) and (in_l[3] != "Master Section"):
                         t_name = in_l[3].strip('"')
                         # Get First Track Title
                         if (not t_name):
@@ -129,7 +131,7 @@ class MidiControlNode(bpy.types.Node, AnimationNode):
             # Generate the controls from control_list, so each track starts at X = 0.
             # Keyframe all controls at frame 1 to be Z = 0.
             cnt  = -2
-            prev = int(control_list[1][0])
+            prev = int(control_list[2][0])
 
             # Delete last entry if no note events follow the channel name.
             last_c = len(control_list) - 1
@@ -195,8 +197,9 @@ class MidiControlNode(bpy.types.Node, AnimationNode):
                     ob.select = True
                     if (on_off == 'on'):
                         # Note On event.
-                        ob.location.z = 0
-                        ob.keyframe_insert( data_path='location', index=2, frame=(frame - easingp) )
+                        if self.square:
+                            ob.location.z = 0
+                            ob.keyframe_insert( data_path='location', index=2, frame=(frame - easingp) )
                         if (velp):
                             # Use Velocity.
                             ob.location.z = velo
@@ -208,7 +211,8 @@ class MidiControlNode(bpy.types.Node, AnimationNode):
                     else:
                         # Note Off Event.
                         frame = frame - (easingp / 2)
-                        ob.keyframe_insert( data_path='location', index=2, frame=(frame - easingp) )
+                        if self.square:
+                            ob.keyframe_insert( data_path='location', index=2, frame=(frame - easingp) )
                         ob.location.z = 0
                         ob.keyframe_insert( data_path='location', index=2, frame=(frame + easingp) )
                     ob.select = False

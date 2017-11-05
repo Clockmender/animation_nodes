@@ -9,7 +9,7 @@ class MidiIndex(bpy.types.PropertyGroup):
 
 class MidiIndexNode(bpy.types.Node, AnimationNode):
     bl_idname = "an_MidiIndexNode"
-    bl_label = "MIDI Evaluation Node, Vers 1.0"
+    bl_label = "MIDI Evaluation Node, Vers 1.1"
     bl_width_default = 350
 
     notes = CollectionProperty(type = MidiIndex)
@@ -68,12 +68,17 @@ class MidiIndexNode(bpy.types.Node, AnimationNode):
             else:
                 self.message1 = "Processed " + str(numb_c) + " Controls & " + str(numb_k) + " Keys"
                 ke_names = []
+                f_curves = []
+                #f_curves = []
                 for obj in keys_objs:
                     note = obj.name.split("_")[0]
                     ke_names.append(note)
 
                 for rec in cont_objs:
                     f_n = rec.name.split("_")[1]
+                    obj_cs = rec.animation_data.action.fcurves
+                    obj_c = obj_cs[0]
+                    f_curves.append(obj_c)
                     indx = 0
                     for i in range( 0, (len(ke_names) - 1)):
                         if ke_names[i] == f_n:
