@@ -18,13 +18,15 @@ class MidiNoteData(bpy.types.PropertyGroup):
 
 class MidiInputNode(bpy.types.Node, AnimationNode):
     bl_idname = "an_MidiInputNode"
-    bl_label = "MIDI Input Node, Vers 1.0"
+    bl_label = "MIDI Bake-To-Curve Node, Vers 1.1 (Single Channel)"
     bl_width_default = 450
 
     # Setup variables
     useV = BoolProperty(name = "Use MIDI Velocity", default = False, update = propertyChanged)
-    offset = IntProperty(name = "Offset", default = 0, min = -1000, max = 10000)
-    easing = FloatProperty(name = "Easing", default = 0.2, precision = 3)
+    square = BoolProperty(name = "Use Square Waveforms", default = True, update = propertyChanged)
+    offset = IntProperty(name = "Offset - Anim Start Frame", default = 0, min = -1000, max = 10000)
+    spacing = IntProperty(name = "Spacing - Separates Notes", default = 0, min = 0)
+    easing = FloatProperty(name = "Easing - Slopes Curves", default = 1, precision = 1, min = 1)
     soundName = StringProperty(name = "Sound")
     keys_grp = StringProperty(name = "Keys Group")
     message1 = StringProperty("")
@@ -34,25 +36,27 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
 
     # I'd suggest to bake one channel per node for now.
     # You can have multiple nodes of course.
-    Channel_Number = StringProperty() # e.g. Piano, ...
+    Channel_Number = StringProperty(name = "MIDI Channel Number") # e.g. Piano, ...
     notes = CollectionProperty(type = MidiNoteData)
 
     def create(self):
-        self.newOutput("Text List", "Notes", "notes")
-        self.newOutput("Float List", "Values", "values")
-        self.newOutput("Integer List", "Indices", "indices")
+        self.newOutput("Text List", "Notes Played", "notes")
+        self.newOutput("Float List", "Note Curve Values", "values")
+        self.newOutput("Integer List", "Keys Indices", "indices")
 
     def draw(self, layout):
         layout.prop(self, "Channel_Number")
+        layout.prop(self, "square")
         layout.prop(self, "useV")
         layout.prop(self, "easing")
         layout.prop(self, "offset")
+        layout.prop(self, "spacing")
         layout.prop(self, "keys_grp")
         layout.separator()
         col = layout.column()
         col.scale_y = 1.5
         self.invokeSelector(col ,"PATH", "bakeMidi", icon = "NEW",
-            text = "Bake Midi")
+            text = "Select MIDI CSV & Bake Midi")
         layout.separator()
         self.invokeSelector(col, "PATH", "loadSound",
             text = "Load Sound for MIDI File (Uses Offset)", icon = "NEW")
@@ -140,7 +144,7 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
                             # Add Tempo Changes to events list.
                             events_list.append(in_l)
 
-                    elif (in_l[2] == 'Title_t') and (int(in_l[0]) > 1):
+                    elif (len(in_l) == 4) and (in_l[2] == 'Title_t') and (int(in_l[0]) > 1) and (in_l[3] != "Master Section") and (in_l[0] == self.Channel_Number):
                         t_name = in_l[3].strip('"')
                         # Get First Track Title
                         if (not t_name):
@@ -156,6 +160,8 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
                         on_off = in_l[2]
                         velo = int(in_l[5]) / 127
                         if on_off == "Note_on_c":
+                            l_easing = self.easing
+                            l_spacing = self.spacing
                             if velp:
                                 on_off = velo
                                 pon_off = 0
@@ -163,6 +169,8 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
                                 on_off = 1
                                 pon_off = 0
                         elif on_off == "Note_off_c":
+                            l_easing = self.easing * 2
+                            l_spacing = 0 - self.spacing
                             on_off = 0
                             if velp:
                                 pon_off = 0.8
@@ -172,10 +180,14 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
                         conv = (60 / (bpm * pulse))
                         frame_e = int(in_l[1])
                         frame_e = frame_e * conv * fps
-                        frame_e = round(frame_e, 2) + self.offset
-                        frame_p = frame_e - self.easing
-                        in_e = [str(pon_off), str(frame_p), note_n]
-                        events_list.append(in_e)
+                        frame_e = round(frame_e, 1) + self.offset
+                        frame_p = frame_e - l_easing
+                        if self.spacing > 0:
+                            frame_e = frame_e + l_spacing
+                            frame_p = frame_p + l_spacing
+                        if self.square:
+                            in_e = [str(pon_off), str(frame_p), note_n]
+                            events_list.append(in_e)
                         in_n = [str(on_off), str(frame_e), note_n]
                         events_list.append(in_n)
                         control = note_n
@@ -186,9 +198,14 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
             numb_1 = 0
             numb_2 = 0
             numb_1 = len(control_list)
-            numb_2 = int(len(events_list) / 2)
-            self.message1 = "Baking File: " + self.midiName + ", Controls= " + str(numb_1 - 1) + ", Channel No = " + self.Channel_Number
-            self.message2 = "Note Events = " +str(numb_2) + ", Pulse = " + str(pulse) + ", BPM = " + str(int(bpm)) + ", Tempo = " + str(tempo)
+            numb_2 = int(len(events_list))
+            if self.square:
+                numb_2 = int(numb_2 / 2)
+            self.message1 = "Baking File: " + self.midiName + ", Notes = " + str(numb_1 - 1) + ", Channel No = " + self.Channel_Number
+            if numb_2 == 0:
+                self.message2 = "Note Events = " +str(numb_2) + " Check Channel Number with CSV File."
+            else:
+                self.message2 = "Note Events = " +str(numb_2) + ", Pulse = " + str(pulse) + ", BPM = " + str(int(bpm)) + ", Tempo = " + str(tempo)
 
         # This function creates an abstraction for the somewhat complicated stuff
         # that is needed to insert the keyframes. It is needed because in Blender
@@ -227,7 +244,8 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
             ev_list = [bit for bit in events_list if bit[2] == f_n]
             addKeyframe = createNote(name)
             # Value, then noteindex, then Frame
-            # addKeyframe(value = 0 ,noteIndex = 0, frame = 1)
+            # Fix value 0 at frame 1
+            addKeyframe(value = 0, noteIndex = indx, frame = 1)
             # Range used so I can test a small section:
             for ind in range(0,len(ev_list)):
                 addKeyframe(value = float(ev_list[ind][0]), noteIndex = indx, frame = float(ev_list[ind][1]) )
