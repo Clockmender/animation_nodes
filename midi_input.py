@@ -26,7 +26,10 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
     square = BoolProperty(name = "Use Square Waveforms", default = True, update = propertyChanged)
     offset = IntProperty(name = "Offset - Anim Start Frame", default = 0, min = -1000, max = 10000)
     spacing = IntProperty(name = "Spacing - Separates Notes", default = 0, min = 0)
-    easing = FloatProperty(name = "Easing - Slopes Curves", default = 1, precision = 1, min = 1)
+    bpm = IntProperty(name = "Beats Per Minute", default = 1, min = 1)
+    nn = IntProperty(name = "Time Sig Numerator", default = 1, min = 1)
+    dd = IntProperty(name = "Time Sig Denominator", default = 1, min = 1)
+    easing = FloatProperty(name = "Easing - Slopes Curves", default = 1, precision = 1, min = 0.1)
     soundName = StringProperty(name = "Sound")
     keys_grp = StringProperty(name = "Keys Group")
     message1 = StringProperty("")
@@ -43,6 +46,10 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
         self.newOutput("Text List", "Notes Played", "notes")
         self.newOutput("Float List", "Note Curve Values", "values")
         self.newOutput("Integer List", "Keys Indices", "indices")
+        self.newOutput("Integer", "Beats Per Minute", "bpm_int")
+        self.newOutput("Integer", "Time Sig Numerator", "nn_int")
+        self.newOutput("Integer", "Time Sig Denominator", "dd_int")
+        self.newOutput("Integer", "Animation Offset Frame", "ot_off")
 
     def draw(self, layout):
         layout.prop(self, "Channel_Number")
@@ -69,7 +76,11 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
         notes = [item.noteName for item in self.notes]
         values = [item.value for item in self.notes]
         indices = [item.noteIndex for item in self.notes]
-        return notes, DoubleList.fromValues(values), indices
+        bpm_int = int(self.bpm)
+        nn_int = self.nn
+        dd_int = self.dd
+        ot_off = self.offset
+        return notes, DoubleList.fromValues(values), indices, bpm_int, nn_int, dd_int, ot_off
 
     def loadSound(self, path):
         editor = getOrCreateSequencer(self.nodeTree.scene)
@@ -138,8 +149,8 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
                         if (in_l[0] == '1'):
                             # Get Initial Tempo.
                             tempo = in_l[3]
-                            bpm = float( round( (60000000 / int(tempo)), 5) )
-                            bps = float( round( (bpm / 60), 5) )
+                            self.bpm = float( round( (60000000 / int(tempo)), 5) )
+                            bps = float( round( (self.bpm / 60), 5) )
                         else:
                             # Add Tempo Changes to events list.
                             events_list.append(in_l)
@@ -153,6 +164,10 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
                             control_list.append(t_name)
                         else:
                             control_list.append(t_name)
+
+                    elif (in_l[2] == 'Time_signature'):
+                        self.nn = int(in_l[3])
+                        self.dd = int(in_l[4])
 
                     # Only process note events, ignore control events.
                     if ( len(in_l) == 6) and ( in_l[2].split('_')[0] == 'Note') and (in_l[0] == self.Channel_Number):
@@ -177,7 +192,7 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
                             else:
                                 pon_off = 1
                         # On-Off, Frame, Note, Velocity
-                        conv = (60 / (bpm * pulse))
+                        conv = (60 / (self.bpm * pulse))
                         frame_e = int(in_l[1])
                         frame_e = frame_e * conv * fps
                         frame_e = round(frame_e, 1) + self.offset
@@ -201,11 +216,11 @@ class MidiInputNode(bpy.types.Node, AnimationNode):
             numb_2 = int(len(events_list))
             if self.square:
                 numb_2 = int(numb_2 / 2)
-            self.message1 = "Baking File: " + self.midiName + ", Notes = " + str(numb_1 - 1) + ", Channel No = " + self.Channel_Number
+            self.message1 = "Baked File: " + self.midiName + ", Notes = " + str(numb_1 - 1) + ", Channel No = " + self.Channel_Number
             if numb_2 == 0:
                 self.message2 = "Note Events = " +str(numb_2) + " Check Channel Number with CSV File."
             else:
-                self.message2 = "Note Events = " +str(numb_2) + ", Pulse = " + str(pulse) + ", BPM = " + str(int(bpm)) + ", Tempo = " + str(tempo)
+                self.message2 = "Note Events = " +str(numb_2) + ", Pulse = " + str(pulse) + ", BPM = " + str(int(self.bpm)) + ", Tempo = " + str(tempo)
 
         # This function creates an abstraction for the somewhat complicated stuff
         # that is needed to insert the keyframes. It is needed because in Blender
